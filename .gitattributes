@@ -1,0 +1,13 @@
+* text=auto
+
+# VBA のソース:リポジトリ(GitHub)では UTF-8、作業フォルダでは Shift_JIS(CP932)と CRLF。
+# Excel の VBA エディターがそのまま取り込み・書き出しできる形にするため。
+*.bas text working-tree-encoding=CP932 eol=crlf
+*.cls text working-tree-encoding=CP932 eol=crlf
+
+*.ps1 text eol=crlf
+*.cs  text eol=crlf
+*.csv text eol=crlf
+
+*.xlsm binary
+*.pdf  binary
