@@ -4,7 +4,9 @@
 
 .DESCRIPTION
     リポジトリの .xlsm はそのままにして、一時フォルダ(%TEMP%)にコピーしたものを使います。
-    マクロは画面を出さない本体(modMain.ExecuteBatch / ExecutePreview)を Application.Run で呼びます。
+    マクロは画面を出さない本体(modMain.ExecuteBatch / ExecutePreview / OutputFolderToCreate、
+    modPdf.CreateFolder)を Application.Run で呼びます。画面を出す Run... は呼びません(ボタンを押したときの
+    画面は、手で確かめます)。
     確かめること:
       ・エラー確認用のデータで、決めたとおりのエラーが「エラー一覧」に出る(tests\expected-errors.csv)
       ・正常なデータで、エラーがない/20件のPDFができる/ファイル名が決まりどおり/1ページずつ
@@ -15,6 +17,8 @@
       ・実行履歴が残り、ブックを閉じて開き直しても消えない。フィルターをかけていても読み落とさない・上書きしない
       ・ボタンにマクロがついている。配る状態のブックに、作成者名や実行の跡が残っていない
       ・エラー値(#N/A)・文字として入った数字・非表示のひな形・長すぎるパス・データなし を、作る前に止める
+      ・保存先フォルダがないとき:1つ上があれば作るかを聞く対象になり、[いいえ] ならエラー一覧へ、[はい] なら
+        最後の1階層だけ作って続く。1つ上もなければ(ドライブ名の打ち間違いなど)聞かず・作らずに止める
 
 .PARAMETER SampleDir
     指定すると、見本のPDF(請求書 INV-1009 とエラー一覧の例)をそのフォルダに置きます(docs\見本 を作り直すとき)。
@@ -314,6 +318,54 @@ try {
     $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($false)
     $history = Get-History $wb
     Test-That '保存先:相対パス「出力」をブックの場所から探す' ($message -like 'エラーはありません*' -and $history[-1].Folder -eq (Join-Path $work '出力')) "$message / $($history[-1].Folder)"
+
+    # 保存先フォルダがないとき。ボタン(Run...)は「このフォルダを作りますか?」と聞いてから、画面を出さない
+    # OutputFolderToCreate と modPdf.CreateFolder を呼ぶ。ここでは聞く画面の代わりに、その2つを直接呼ぶ
+    $newFolder = Join-Path $work '新しい出力'
+    Set-Setting $wb '保存先フォルダ' '新しい出力'   # ブックの場所(ある)の下の、まだないフォルダ
+    $ask = [string](Invoke-Macro $wb 'modMain.OutputFolderToCreate')
+    Test-That '保存先がない:1つ上のフォルダがあれば、作るかを聞く(フルパスで)' ($ask -eq $newFolder) $ask
+    $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($false)   # [いいえ]:作らずに入力チェックへ
+    $errs = Get-ErrorRows $wb
+    Test-That '保存先がない:[いいえ] なら作らず、今までどおりエラー一覧に出して止まる' `
+        ($errs.Count -eq 1 -and $errs[0].Key -like '設定,*,,保存先フォルダ' -and $errs[0].Message.StartsWith('保存先フォルダがありません:') -and -not (Test-Path -LiteralPath $newFolder)) `
+        "$message / $(@($errs | ForEach-Object { $_.Message }) -join ' / ')"
+    $reason = [string](Invoke-Macro $wb 'modPdf.CreateFolder' @($ask))   # [はい]:作って、そのまま続ける
+    $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($false)
+    Test-That '保存先がない:[はい] ならフォルダを作り、そのまま続けられる' `
+        ($reason -eq '' -and (Test-Path -LiteralPath $newFolder -PathType Container) -and $message -like 'エラーはありません*') "$reason / $message"
+    $ask = [string](Invoke-Macro $wb 'modMain.OutputFolderToCreate')
+    $reason = [string](Invoke-Macro $wb 'modPdf.CreateFolder' @($newFolder))
+    Test-That '保存先がある:作るかを聞かない(作る手続きを呼んでも何もしない)' ($ask -eq '' -and $reason -eq '') "$ask / $reason"
+
+    # 1つ上のフォルダもないとき(途中のフォルダもない・ドライブ名の打ち間違い):聞かず、作らず、今までどおり止める
+    $drives = @([IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name.Substring(0, 1).ToUpper() })
+    $noDrive = @(68..90 | ForEach-Object { [string][char]$_ } | Where-Object { $drives -notcontains $_ })[-1]   # このPCにないドライブ
+    foreach ($case in @(@('途中のフォルダもない', (Join-Path $work 'ない\出力')), @('このPCにないドライブ', "$($noDrive):\請求書PDF"))) {
+        $bad = $case[1]
+        Set-Setting $wb '保存先フォルダ' $bad
+        $ask = [string](Invoke-Macro $wb 'modMain.OutputFolderToCreate')
+        $reason = [string](Invoke-Macro $wb 'modPdf.CreateFolder' @($bad))
+        $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($false)
+        $errs = Get-ErrorRows $wb
+        Test-That "保存先の1つ上もない($($case[0])):聞かず、作らず、エラー一覧に出して止まる" `
+            ($ask -eq '' -and $reason -ne '' -and -not (Test-Path -LiteralPath (Split-Path -Parent $bad)) -and
+             $errs.Count -eq 1 -and $errs[0].Message.StartsWith('保存先フォルダも、その1つ上のフォルダもありません:')) `
+            "$bad / $ask / $reason / $(@($errs | ForEach-Object { $_.Message }) -join ' / ')"
+    }
+
+    # ドライブのすぐ下(「C:\請求書PDF」の形)は、1つ上がドライブ(「C:\」)でも作るかを聞く(ここでは作らない)
+    $underDrive = (Split-Path -Qualifier $work) + '\batch-invoice-pdf-test-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+    Set-Setting $wb '保存先フォルダ' $underDrive
+    $ask = [string](Invoke-Macro $wb 'modMain.OutputFolderToCreate')
+    Test-That '保存先がドライブのすぐ下(C:\請求書PDF の形):作るかを聞く' ($ask -eq $underDrive -and -not (Test-Path -LiteralPath $underDrive)) $ask
+
+    # 作れないとき(同じ名前のファイルがある など)は、エラーで止まらずに理由を返す(ボタンからなら、その理由を見せる)
+    $blocker = Join-Path $work '同じ名前のファイル'
+    Set-Content -LiteralPath $blocker -Value 'x'
+    $reason = [string](Invoke-Macro $wb 'modPdf.CreateFolder' @($blocker))
+    Test-That '作れないとき:エラーで止まらず、理由を返す' ($reason -ne '' -and (Test-Path -LiteralPath $blocker -PathType Leaf)) $reason
+    Set-Setting $wb '保存先フォルダ' '出力'
 
     # 実行履歴にフィルターをかけて、いちばん下の行を隠しても、その下に足す(隠れた行を上書きしない)
     $historySheet = $wb.Worksheets.Item('実行履歴')

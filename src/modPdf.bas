@@ -6,6 +6,7 @@ Attribute VB_Name = "modPdf"
 '   差し込みを足すときは、modConstants に TAG_... を足し、BuildFileName と UnknownTag に足します。
 ' ・PDFは Excel の「PDFとして保存」と同じ機能(ExportAsFixedFormat)で、このPCのフォルダにだけ
 '   保存します。ネット通信・外部サービス・アドインは使いません。
+' ・保存先フォルダがないときに作る手続き(CreateFolder)もここにあります。作るのは最後の1階層だけです。
 '==============================================================================
 Option Explicit
 
@@ -68,6 +69,44 @@ End Function
 Public Function FileExists(ByVal filePath As String) As Boolean
     On Error Resume Next   ' ないときは GetAttr がエラーになり、False のまま返る
     FileExists = ((GetAttr(filePath) And vbDirectory) = 0)
+End Function
+
+' フォルダがなく、その1つ上のフォルダはあるか(最後の1階層だけ作れば使えるか)。
+' 1つ上もないとき(ドライブ名の打ち間違いなど)は False。打ち間違いのまま、思わぬ場所に作らないためです。
+Public Function CanCreateFolder(ByVal folderPath As String) As Boolean
+    Dim parentPath As String
+
+    If folderPath = "" Or FolderExists(folderPath) Then Exit Function
+    parentPath = ParentFolder(folderPath)
+    If parentPath <> "" Then CanCreateFolder = FolderExists(parentPath)
+End Function
+
+' フォルダの最後の1階層だけを作ります(画面は出しません)。途中のフォルダまでは作りません。
+' 作れたとき・もうあるときは ""、作れなかったときは理由を返します。
+Public Function CreateFolder(ByVal folderPath As String) As String
+    If FolderExists(folderPath) Then Exit Function
+    If Not CanCreateFolder(folderPath) Then
+        CreateFolder = "1つ上のフォルダがないため、作りませんでした。"
+        Exit Function
+    End If
+
+    On Error Resume Next   ' 作れないとき(書き込みの権限がない など)は、止まらずに理由を返す
+    MkDir folderPath
+    If Err.Number <> 0 Then CreateFolder = Err.Description & "(エラー番号 " & Err.Number & ")"
+End Function
+
+' 1つ上のフォルダを返します(「C:\請求書PDF」なら「C:\」)。上がないとき(「\\サーバー\共有」など)は ""。
+Private Function ParentFolder(ByVal folderPath As String) As String
+    Dim pos As Long
+
+    pos = InStrRev(folderPath, "\")
+    If pos = 0 Then Exit Function
+    ParentFolder = Left$(folderPath, pos - 1)
+    If ParentFolder Like "[A-Za-z]:" Then
+        ParentFolder = ParentFolder & "\"   ' ドライブだけのときは「C:\」の形にする
+    ElseIf Left$(folderPath, 2) = "\\" And UBound(Split(ParentFolder, "\")) < 3 Then
+        ParentFolder = ""                   ' 「\\サーバー」だけでは、フォルダではない
+    End If
 End Function
 
 ' シートをPDFに保存します。失敗したときはエラーを起こし、呼んだ側(ExecuteBatch)で受け止めます。

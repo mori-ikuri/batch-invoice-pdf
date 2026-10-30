@@ -178,9 +178,16 @@ Private Sub CheckSettings(ByRef st As AppSettings, ByVal errorList As Collection
             AddError errorList, sheetLabel, SettingRow(SET_OUTPUT_FOLDER), "", SET_OUTPUT_FOLDER, _
                 "このブックが未保存か、OneDrive などの上で開かれているため、相対パスを使えません。" & _
                 "「C:\請求書PDF」のようなフルパスにしてください。"
-        ElseIf Not FolderExists(st.OutputFolder) Then
+        ElseIf CanCreateFolder(st.OutputFolder) Then
+            ' 1つ上のフォルダはある:ボタンから実行したときに作るかを聞き、[いいえ] だった(または作れなかった)
             AddError errorList, sheetLabel, SettingRow(SET_OUTPUT_FOLDER), "", SET_OUTPUT_FOLDER, _
-                "保存先フォルダがありません:" & st.OutputFolder & "。フォルダを作るか、設定を直してください。"
+                "保存先フォルダがありません:" & st.OutputFolder & "。" & _
+                "もう一度実行して「このフォルダを作りますか?」に [はい] と答えるか、設定を直してください。"
+        ElseIf Not FolderExists(st.OutputFolder) Then
+            ' 1つ上のフォルダもないときは、作るかを聞かない(打ち間違いのまま、思わぬ場所に作らないため)
+            AddError errorList, sheetLabel, SettingRow(SET_OUTPUT_FOLDER), "", SET_OUTPUT_FOLDER, _
+                "保存先フォルダも、その1つ上のフォルダもありません:" & st.OutputFolder & "。" & _
+                "ドライブ名やフォルダ名に打ち間違いがないか、設定を確かめてください(正しいときは、フォルダを作ってからもう一度実行します)。"
         End If
     End If
 End Sub

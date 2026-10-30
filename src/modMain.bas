@@ -12,9 +12,11 @@ Attribute VB_Name = "modMain"
 '   → 入力チェック(modValidate)  ※エラーが1件でもあれば、ここで止まり1件も作らない
 '   → 1件ずつ ひな形へ流し込み(modFill) → PDF保存(modPdf)
 '   → 実行履歴へ記録(modHistory)
+' 保存先フォルダがないときは、その前に Run... が「このフォルダを作りますか?」と聞きます
+' (1つ上のフォルダがあるときだけ。作るのは最後の1階層だけ)。
 '
-' メッセージを出すのは Run... の3つだけです。ExecuteBatch・ExecutePreview は画面を出さずに
-' 結果の文章を返すので、テストの道具(tests\run-tests.ps1)からも呼べます。
+' メッセージを出すのは Run... の3つだけです。ExecuteBatch・ExecutePreview・OutputFolderToCreate と、
+' フォルダを作る modPdf.CreateFolder は画面を出さないので、テストの道具(tests\run-tests.ps1)からも呼べます。
 '==============================================================================
 Option Explicit
 
@@ -30,11 +32,13 @@ Public LastTemplateSheet As String   ' ひな形に表示したシート(RunPrev
 
 ' 「入力をチェック」:PDFは作らず、入力チェックだけをします。
 Public Sub RunCheckOnly()
+    OfferToCreateFolder
     ShowResult ExecuteBatch(False)
 End Sub
 
 ' 「PDFを作成」:入力チェックのあと、確認してからPDFを作ります。
 Public Sub RunCreatePdfs()
+    OfferToCreateFolder
     ShowResult ExecuteBatch(True, True)
 End Sub
 
@@ -264,9 +268,37 @@ Failed:
                      "内容:" & Err.Description & "(エラー番号 " & Err.Number & ")"
 End Function
 
+' 作るかを聞く保存先フォルダのフルパスを返します。フォルダがなく、その1つ上のフォルダはあるときだけで、
+' ほかは ""(もうある・1つ上もない・設定を読めない など。そのときは入力チェックがエラー一覧に出します)。
+Public Function OutputFolderToCreate() As String
+    Dim st As AppSettings
+
+    On Error Resume Next   ' 設定を読めないときは "" のまま
+    st = LoadSettings(New Collection)
+    If CanCreateFolder(st.OutputFolder) Then OutputFolderToCreate = st.OutputFolder
+End Function
+
 '------------------------------------------------------------------------------
 ' 小さな道具
 '------------------------------------------------------------------------------
+
+' 保存先フォルダがなく、その1つ上のフォルダはあるときに、作るかを聞きます。[はい] なら作ります。
+' [いいえ] のときや作れなかったときは、このあとの入力チェックが「エラー一覧」に出して止めます。
+Private Sub OfferToCreateFolder()
+    Dim folderPath As String
+    Dim reason As String
+
+    folderPath = OutputFolderToCreate()
+    If folderPath = "" Then Exit Sub
+    If MsgBox("保存先フォルダがありません:" & folderPath & "。" & vbCrLf & "このフォルダを作りますか?", _
+              vbYesNo + vbQuestion, TOOL_TITLE) <> vbYes Then Exit Sub
+
+    reason = CreateFolder(folderPath)
+    If reason <> "" Then
+        MsgBox "保存先フォルダを作れませんでした:" & folderPath & vbCrLf & "内容:" & reason & vbCrLf & vbCrLf & _
+               "設定の保存先を、書き込めるフォルダに直してください。", vbExclamation, TOOL_TITLE
+    End If
+End Sub
 
 ' 結果に合わせてメッセージを出し、見るべきシートを開きます。
 Private Sub ShowResult(ByVal message As String)
