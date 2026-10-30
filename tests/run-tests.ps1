@@ -12,14 +12,20 @@
       ・エラーが1件でもあれば、1件も作らない
       ・同名ファイル:「止める」で止まり、「上書き」で置き換わる
       ・想定外のエラー(PDFを開いたまま上書き)で、止まった請求番号が画面の文と実行履歴に出る
-      ・実行履歴が残り、ブックを閉じて開き直しても消えない
+      ・実行履歴が残り、ブックを閉じて開き直しても消えない。フィルターをかけていても読み落とさない・上書きしない
       ・ボタンにマクロがついている。配る状態のブックに、作成者名や実行の跡が残っていない
+      ・エラー値(#N/A)・文字として入った数字・非表示のひな形・長すぎるパス・データなし を、作る前に止める
+
+.PARAMETER SampleDir
+    指定すると、見本のPDF(請求書 INV-1009 とエラー一覧の例)をそのフォルダに置きます(docs\見本 を作り直すとき)。
 
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-tests.ps1
+    powershell -NoProfile -ExecutionPolicy Bypass -File tests\run-tests.ps1 -SampleDir docs\見本
 #>
 param(
     [string]$BookDir = (Split-Path -Parent $PSScriptRoot),
+    [string]$SampleDir = '',
     [switch]$KeepWork
 )
 
@@ -163,6 +169,10 @@ try {
         Test-That "ボタン:$m がついている" (@($actions | Where-Object { $_ -like "*$m" }).Count -eq 1) ($actions -join ' / ')
     }
     Test-That '配る状態:最初に「使い方」シートが開く' ($wb.ActiveSheet.Name -eq '使い方') $wb.ActiveSheet.Name
+    Test-That 'ひな形:長い顧客名・品名は縮小して収める' ($tpl.Range('B4').ShrinkToFit -and $tpl.Range('B14').ShrinkToFit -and $tpl.Range('B25').ShrinkToFit)
+    $honorific = ''
+    try { $honorific = $wb.Worksheets.Item('請求一覧').Range('D2').Validation.Formula1 } catch { }
+    Test-That '請求一覧:敬称をドロップダウンで選べる(御中・様)' ($honorific -eq '御中,様') $honorific
     $wb.Close($false)
 
     #---------------------------------------------------------------------------
@@ -195,6 +205,13 @@ try {
     # 入力チェックだけ
     $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($false)
     Test-That "正常:エラーなし(請求 $($invoices.Count) 件)" ($message -like "エラーはありません。請求 $($invoices.Count) 件*") $message
+
+    # 請求一覧にフィルターをかけて、下の方の行を隠しても、全件を読む
+    $invoiceTable = $wb.Worksheets.Item('請求一覧').ListObjects.Item(1)
+    [void]$invoiceTable.Range.AutoFilter(3, '株式会社ひな形システムズ')
+    $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($false)
+    $invoiceTable.AutoFilter.ShowAllData()
+    Test-That "フィルター:請求一覧の行を隠しても $($invoices.Count) 件とも読む" ($message -like "エラーはありません。請求 $($invoices.Count) 件*") $message
 
     # ひな形の計算(端数処理の3つの設定で、全件)
     $tpl = $wb.Worksheets.Item('請求書ひな形')
@@ -235,8 +252,11 @@ try {
     Test-That 'PDF作成:終わったあと、ひな形を空に戻す' ($tpl.Range('F4').Text -eq '' -and $tpl.Range('B14').Text -eq '')
     $history = Get-History $wb
     Test-That 'PDF作成:実行履歴に日時・件数・保存先' ($history[-1].Operation -eq 'PDF作成' -and $history[-1].Result -eq '完了' -and $history[-1].Count -eq "$($invoices.Count)" -and $history[-1].Folder -eq $out) ($history[-1] | Out-String)
+    # 見本(値引きの行と 8% の品目がある INV-1009)。-SampleDir のときに docs\見本 などへ置く
+    $samplePdf = $pdfs | Where-Object { $_.Name -like 'INV-1009_*' }
+    $sampleName = $samplePdf.Name
     $sample = Join-Path $work 'sample.pdf'
-    Copy-Item -LiteralPath ($pdfs | Where-Object { $_.Name -like 'INV-1009_*' }).FullName -Destination $sample
+    Copy-Item -LiteralPath $samplePdf.FullName -Destination $sample
 
     # 同名ファイル:止める
     $stamps = @{}
@@ -295,6 +315,17 @@ try {
     $history = Get-History $wb
     Test-That '保存先:相対パス「出力」をブックの場所から探す' ($message -like 'エラーはありません*' -and $history[-1].Folder -eq (Join-Path $work '出力')) "$message / $($history[-1].Folder)"
 
+    # 実行履歴にフィルターをかけて、いちばん下の行を隠しても、その下に足す(隠れた行を上書きしない)
+    $historySheet = $wb.Worksheets.Item('実行履歴')
+    $before = Get-History $wb
+    [void]$historySheet.Range("A3:F$(3 + $before.Count)").AutoFilter(2, 'PDF作成')   # 「入力チェック」の行を隠す(いちばん下の行も)
+    $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($false)
+    $historySheet.AutoFilterMode = $false
+    $after = Get-History $wb
+    Test-That 'フィルター:実行履歴の行を隠しても、隠れた行を上書きせず下に足す' `
+        ($after.Count -eq $before.Count + 1 -and $after[-2].Operation -eq $before[-1].Operation -and $after[-2].Detail -eq $before[-1].Detail -and $after[-1].Operation -eq '入力チェック') `
+        "前 $($before.Count) 行 → 後 $($after.Count) 行"
+
     # ひな形をコピーして使い分ける(名前の定義もシートと一緒にコピーされる)
     $tpl.Copy([Type]::Missing, $tpl)
     $copied = $wb.Worksheets.Item($tpl.Index + 1)
@@ -324,6 +355,72 @@ try {
     $wb = $app.Workbooks.Open((Join-Path $work 'normal.xlsm'))
     Test-That "実行履歴:閉じて開き直しても残る($count 行)" ((Get-History $wb).Count -eq $count) "$((Get-History $wb).Count) 行"
     $wb.Close($false)
+
+    #---------------------------------------------------------------------------
+    # 作る前に止めるもの:エラー値・文字の数字・非表示のひな形・長すぎるパス・データなし
+    #---------------------------------------------------------------------------
+    $outEdge = Join-Path $work 'out-edge'
+    New-Item -ItemType Directory -Path $outEdge | Out-Null
+    $wb = Open-Copy $normalBook 'edge.xlsm'
+    Set-Setting $wb '保存先フォルダ' $outEdge
+    $invoiceSheet = $wb.Worksheets.Item('請求一覧')
+    $details = $wb.Worksheets.Item('明細')
+    $invoiceSheet.Range('C2').Formula = '=NA()'                          # 顧客名がエラー値(VLOOKUP の失敗など)
+    $details.Range('C2').NumberFormat = '@'
+    [BatchInvoicePdf.Build.Com]::SetValue2($details.Range('C2'), '5')    # 数量が文字の「5」
+    $wb.Worksheets.Item('請求書ひな形').Visible = 0                        # ひな形を非表示
+    $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($true)
+    $errs = Get-ErrorRows $wb
+    $pick = { param($key, $like) @($errs | Where-Object { $_.Key -eq $key -and $_.Message -like $like }).Count }
+    Test-That 'エラー値:顧客名の #N/A を「エラー値」と知らせる' ((& $pick '請求一覧,2,INV-1001,顧客名' '*エラー値*') -eq 1) ($errs | ForEach-Object { $_.Key } | Select-Object -First 5 | Out-String)
+    Test-That '文字の数字:数量の「5」(文字)を「文字として入っています」と知らせる' ((& $pick '明細,2,INV-1001,数量' '*文字として*') -eq 1)
+    Test-That '非表示のひな形:PDFにできないと、作る前に知らせる' ((& $pick '請求書ひな形,,,シートの表示' '*非表示*') -eq 1)
+    Test-That '上の3つ:1件も作らずに止まる' ($message -like '*PDFは1件も作成していません*' -and @(Get-ChildItem $outEdge).Count -eq 0) $message
+    [BatchInvoicePdf.Build.Com]::SetValue2($invoiceSheet.Range('C2'), '株式会社ひな形システムズ')
+    [void]$details.Range('C2').ClearFormats()
+    [BatchInvoicePdf.Build.Com]::SetValue2($details.Range('C2'), 5.0)
+    $wb.Worksheets.Item('請求書ひな形').Visible = -1
+
+    # 顧客名は式で出してもよい(手順書に書いたこと):式の結果が請求書に出る
+    $invoiceSheet.Range('C3').Formula = '="例題建設"&"株式会社"'
+    $msg = Invoke-Macro $wb 'modMain.ExecutePreview' @('INV-1002')
+    Test-That '式:顧客名を式で出しても、その結果が請求書に出る' ($wb.Worksheets.Item('請求書ひな形').Range('B4').Text -eq '例題建設株式会社') "$msg / B4=$($wb.Worksheets.Item('請求書ひな形').Range('B4').Text)"
+    [BatchInvoicePdf.Build.Com]::SetValue2($invoiceSheet.Range('C3'), '例題建設株式会社')
+
+    # 保存先とファイル名を合わせて 255 文字を超えるものだけを止める(Excel のPDF保存の上限)
+    $long = $work
+    while ($long.Length -lt 230) { $long = Join-Path $long ('d' * [Math]::Min(50, 232 - $long.Length - 1)) }
+    New-Item -ItemType Directory -Path $long -Force | Out-Null
+    Set-Setting $wb '保存先フォルダ' $long
+    $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($false)
+    $tooLong = @($invoices | Where-Object { ($long + '\' + $_.'請求番号' + '_' + $_.'顧客名' + '.pdf').Length -gt 255 })
+    $errs = Get-ErrorRows $wb
+    $longErrs = @($errs | Where-Object { $_.Message -like '*255 文字を超えます*' })
+    Test-That "パスの長さ:255 文字を超える $($tooLong.Count) 件だけを止める(保存先 $($long.Length) 文字)" `
+        ($tooLong.Count -gt 0 -and $tooLong.Count -lt $invoices.Count -and $longErrs.Count -eq $tooLong.Count -and $errs.Count -eq $tooLong.Count) `
+        "期待 $($tooLong.Count) 件 / エラー $($errs.Count) 件 / $message"
+
+    # 差し込み先のセルのロックを外せば、ひな形を保護してもPDFを作れる(引き継ぎメモに書いたこと)
+    $outProtect = Join-Path $work 'out-protect'
+    New-Item -ItemType Directory -Path $outProtect | Out-Null
+    Set-Setting $wb '保存先フォルダ' $outProtect
+    $protectedTemplate = $wb.Worksheets.Item('請求書ひな形')
+    foreach ($n in '差込_請求番号', '差込_請求日', '差込_顧客名', '差込_敬称', '差込_支払期限', '差込_品名', '差込_数量', '差込_単価', '差込_税率') {
+        foreach ($cell in $protectedTemplate.Range($n).Cells) { $cell.MergeArea.Locked = $false }
+    }
+    $protectedTemplate.Protect()
+    $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($true)
+    $protectedTemplate.Unprotect()
+    Test-That '保護したひな形:差し込み先のロックを外せば、全件PDFにできる' `
+        ($message -like "$($invoices.Count) 件の請求書PDFを作成しました*" -and @(Get-ChildItem $outProtect -Filter *.pdf).Count -eq $invoices.Count) $message
+
+    # データが1件もないときは、0 件で「完了」にしない
+    Set-Setting $wb '保存先フォルダ' $outEdge
+    [void]$invoiceSheet.ListObjects.Item(1).DataBodyRange.ClearContents()
+    $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($true)
+    $errs = Get-ErrorRows $wb
+    Test-That 'データなし:「請求が1件もありません」で止まる' ((& $pick '請求一覧,,,データ' '*1件もありません*') -eq 1 -and $message -like '*PDFは1件も作成していません*') $message
+    $wb.Close($false)
 } finally {
     Stop-ExcelSession $session
 }
@@ -331,9 +428,16 @@ try {
 $ng = @($results | Where-Object { -not $_.Ok })
 Write-Host ''
 Write-Host "結果:$($results.Count) 項目中 OK $($results.Count - $ng.Count) / NG $($ng.Count)"
-Write-Host "見本のPDF:$sample / $errorSample"
-if (-not $KeepWork -and $ng.Count -eq 0) {
-    Get-ChildItem -Path $work -Exclude 'sample.pdf', 'error-list-sample.pdf' | Remove-Item -Recurse -Force
+if ($ng.Count -eq 0 -and $SampleDir) {
+    $dest = $(if ([IO.Path]::IsPathRooted($SampleDir)) { $SampleDir } else { Join-Path $root $SampleDir })
+    New-Item -ItemType Directory -Force -Path $dest | Out-Null
+    Copy-Item -LiteralPath $sample -Destination (Join-Path $dest $sampleName) -Force
+    Copy-Item -LiteralPath $errorSample -Destination (Join-Path $dest 'エラー一覧の例.pdf') -Force
+    Write-Host "見本のPDFを置きました:$dest"
 }
-Write-Host "作業フォルダ:$work"
+if (-not $KeepWork -and $ng.Count -eq 0) {
+    Remove-Item -Path $work -Recurse -Force
+} else {
+    Write-Host "作業フォルダ(確かめたあとに消してかまいません):$work"
+}
 if ($ng.Count -gt 0) { exit 1 }

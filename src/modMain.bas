@@ -40,11 +40,17 @@ End Sub
 
 ' 「1件だけひな形に表示」:指定した請求をひな形に入れて見せます(PDFは作りません)。
 Public Sub RunPreview()
+    Dim defaultNo As String
     Dim invoiceNumber As String
     Dim message As String
 
+    ' 最初に入れておく番号:「請求一覧」「明細」で選んでいる行(Alt+F8 から実行したとき)、
+    ' なければ「請求一覧」の先頭の請求番号(「使い方」シートのボタンから押したとき)
+    defaultNo = SelectedInvoiceNo()
+    If defaultNo = "" Then defaultNo = FirstInvoiceNo()
+
     invoiceNumber = Trim$(InputBox("ひな形に表示する請求番号を入れてください。(PDFは作りません)", _
-                                   TOOL_TITLE, SelectedInvoiceNo()))
+                                   TOOL_TITLE, defaultNo))
     If invoiceNumber = "" Then Exit Sub
 
     message = ExecutePreview(invoiceNumber)
@@ -115,7 +121,7 @@ Public Function ExecuteBatch(ByVal createPdfs As Boolean, Optional ByVal askBefo
     End If
 
     If askBeforeCreate Then
-        Application.ScreenUpdating = True
+        EndWork   ' 確認のあいだは、画面の書き換えとカーソル(砂時計)を元に戻す
         answer = MsgBox(invoices.Count & " 件の請求書PDFを作成します。" & vbCrLf & _
                         "保存先:" & st.OutputFolder & vbCrLf & _
                         IIf(st.IfExists = IF_EXISTS_OVERWRITE, "(同じ名前のファイルは置き換えます)" & vbCrLf, "") & _
@@ -126,7 +132,7 @@ Public Function ExecuteBatch(ByVal createPdfs As Boolean, Optional ByVal askBefo
             AppendHistory operation, RESULT_CANCELLED, 0, st.OutputFolder, ""
             GoTo Finish
         End If
-        Application.ScreenUpdating = False
+        BeginWork
     End If
 
     stage = "PDF作成"
@@ -284,6 +290,16 @@ Private Sub ShowResult(ByVal message As String)
             MsgBox message, vbCritical, TOOL_TITLE
     End Select
 End Sub
+
+' 「請求一覧」の先頭の請求番号を返します(読めないときは "")。
+Private Function FirstInvoiceNo() As String
+    Dim invoices As Collection
+
+    On Error Resume Next   ' 読めないときは "" のまま
+    Set invoices = ReadInvoices(New Collection)
+    If invoices Is Nothing Then Exit Function
+    If invoices.Count > 0 Then FirstInvoiceNo = invoices(1).InvoiceNo
+End Function
 
 ' 「請求一覧」「明細」で選んでいる行の請求番号を返します(ほかのシートなら "")。
 Private Function SelectedInvoiceNo() As String

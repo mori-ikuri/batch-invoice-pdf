@@ -14,7 +14,8 @@ Public Sub AppendHistory(ByVal operation As String, ByVal outcome As String, ByV
     Dim r As Long
 
     Set ws = shHistory
-    r = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row + 1
+    ' フィルターで隠れた行があっても上書きしないよう、隠れた行も数えて最後の行を探す
+    r = LastValueRow(ws, 1) + 1
     If r < HISTORY_FIRST_ROW Then r = HISTORY_FIRST_ROW
 
     ws.Cells(r, 1).Value = Now

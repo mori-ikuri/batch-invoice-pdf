@@ -45,15 +45,27 @@ function Start-ExcelSession {
     $app.Visible = $false
     $app.DisplayAlerts = $false
     $app.ScreenUpdating = $false
+    # プロセス番号は使い回されるので、起動時刻も覚えておき、止める前に同じ Excel かを確かめる
+    $startTicks = (Get-Process -Id $processId).StartTime.Ticks
 
     # 時間内に終わらなければ、この Excel だけを止める
     $watchdog = Start-Job -ScriptBlock {
-        param($targetId, $seconds)
+        param($targetId, $targetTicks, $seconds)
         Start-Sleep -Seconds $seconds
-        Stop-Process -Id $targetId -Force -ErrorAction SilentlyContinue
-    } -ArgumentList $processId, $TimeoutSec
+        $p = Get-Process -Id $targetId -ErrorAction SilentlyContinue
+        if ($p -and $p.ProcessName -eq 'EXCEL' -and $p.StartTime.Ticks -eq $targetTicks) {
+            Stop-Process -Id $targetId -Force -ErrorAction SilentlyContinue
+        }
+    } -ArgumentList $processId, $startTicks, $TimeoutSec
 
-    [pscustomobject]@{ App = $app; ProcessId = [int]$processId; Watchdog = $watchdog }
+    [pscustomobject]@{ App = $app; ProcessId = [int]$processId; StartTicks = $startTicks; Watchdog = $watchdog }
+}
+
+# 起動した Excel がまだ動いているか(同じ番号の別のプロセスは数えない)
+function Test-ExcelSessionAlive {
+    param($Session)
+    $p = Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue
+    [bool]($p -and $p.ProcessName -eq 'EXCEL' -and $p.StartTime.Ticks -eq $Session.StartTicks)
 }
 
 function Stop-ExcelSession {
@@ -72,10 +84,12 @@ function Stop-ExcelSession {
 
     # Quit のあとも少し残ることがあるので、待ってから、この Excel だけを止める
     $deadline = (Get-Date).AddSeconds(10)
-    while ((Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {
+    while ((Test-ExcelSessionAlive $Session) -and ((Get-Date) -lt $deadline)) {
         Start-Sleep -Milliseconds 300
     }
-    Stop-Process -Id $Session.ProcessId -Force -ErrorAction SilentlyContinue
+    if (Test-ExcelSessionAlive $Session) {
+        Stop-Process -Id $Session.ProcessId -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # Excel の色の値(赤 + 緑*256 + 青*65536)

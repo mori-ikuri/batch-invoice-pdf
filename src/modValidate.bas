@@ -9,6 +9,9 @@ Attribute VB_Name = "modValidate"
 '==============================================================================
 Option Explicit
 
+' セルがエラー値(#N/A など)のときのメッセージ。式(VLOOKUP など)で値を出しているときに起きやすい
+Private Const MSG_ERROR_VALUE As String = "セルがエラー値(#N/A など)になっています。式や、式が参照している元のデータを確かめてください。"
+
 ' エラーを1件足します。rowNumber が 0 のときは「行」を空にします。
 Public Sub AddError(ByVal errorList As Collection, ByVal sheetLabel As String, ByVal rowNumber As Long, _
                     ByVal invoiceNumber As String, ByVal fieldLabel As String, ByVal detail As String)
@@ -67,8 +70,7 @@ Public Sub CheckDetail(ByVal d As clsDetail, ByVal errorList As Collection)
     If IsBlankValue(d.Quantity) Then
         AddError errorList, sheetLabel, d.RowNo, d.InvoiceNo, COL_QUANTITY, "入っていません(必須です)。"
     ElseIf Not IsNumberValue(d.Quantity) Then
-        AddError errorList, sheetLabel, d.RowNo, d.InvoiceNo, COL_QUANTITY, _
-            "数値にしてください(いまの値:" & CellText(d.Quantity) & ")。"
+        AddError errorList, sheetLabel, d.RowNo, d.InvoiceNo, COL_QUANTITY, NotNumberMessage(d.Quantity)
     ElseIf d.Quantity <= 0 Then
         AddError errorList, sheetLabel, d.RowNo, d.InvoiceNo, COL_QUANTITY, _
             "0より大きい数にしてください(いまの値:" & CellText(d.Quantity) & ")。"
@@ -77,12 +79,13 @@ Public Sub CheckDetail(ByVal d As clsDetail, ByVal errorList As Collection)
     If IsBlankValue(d.UnitPrice) Then
         AddError errorList, sheetLabel, d.RowNo, d.InvoiceNo, COL_UNIT_PRICE, "入っていません(必須です)。"
     ElseIf Not IsNumberValue(d.UnitPrice) Then
-        AddError errorList, sheetLabel, d.RowNo, d.InvoiceNo, COL_UNIT_PRICE, _
-            "数値にしてください(いまの値:" & CellText(d.UnitPrice) & ")。"
+        AddError errorList, sheetLabel, d.RowNo, d.InvoiceNo, COL_UNIT_PRICE, NotNumberMessage(d.UnitPrice)
     End If
 
     If IsBlankValue(d.TaxRate) Then
         AddError errorList, sheetLabel, d.RowNo, d.InvoiceNo, COL_TAX_RATE, "入っていません(必須です)。"
+    ElseIf Not IsNumberValue(d.TaxRate) Then
+        AddError errorList, sheetLabel, d.RowNo, d.InvoiceNo, COL_TAX_RATE, NotNumberMessage(d.TaxRate)
     ElseIf NormalizeTaxRate(d.TaxRate) = 0 Then
         AddError errorList, sheetLabel, d.RowNo, d.InvoiceNo, COL_TAX_RATE, _
             "10% か 8% にしてください(いまの値:" & TaxRateText(d.TaxRate) & ")。"
@@ -100,7 +103,7 @@ Public Sub WriteErrorList(ByVal errorList As Collection, ByVal invoiceCount As L
     Dim i As Long
 
     Set ws = shErrors
-    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    lastRow = LastValueRow(ws, 1)   ' フィルターで隠れた行も消す
     If lastRow >= ERROR_FIRST_ROW Then
         ws.Range(ws.Cells(ERROR_FIRST_ROW, 1), ws.Cells(lastRow, ERROR_COLUMNS)).ClearContents
     End If
@@ -358,11 +361,13 @@ Private Function IsRegistered(ByVal inv As clsInvoice, ByVal byNumber As Object)
     IsRegistered = (byNumber(inv.InvoiceNo) Is inv)
 End Function
 
-' 文字の項目が空なら、エラーにします。
+' 文字の項目が空・エラー値なら、エラーにします(エラー値のまま進むと、PDFに「#エラー」と出てしまう)。
 Private Sub RequireText(ByVal errorList As Collection, ByVal sheetLabel As String, ByVal rowNumber As Long, _
                         ByVal invoiceNumber As String, ByVal fieldLabel As String, ByVal fieldText As String)
     If fieldText = "" Then
         AddError errorList, sheetLabel, rowNumber, invoiceNumber, fieldLabel, "入っていません(必須です)。"
+    ElseIf fieldText = CELL_ERROR_TEXT Then
+        AddError errorList, sheetLabel, rowNumber, invoiceNumber, fieldLabel, MSG_ERROR_VALUE
     End If
 End Sub
 
@@ -371,11 +376,36 @@ Private Sub CheckDate(ByVal errorList As Collection, ByVal sheetLabel As String,
                       ByVal invoiceNumber As String, ByVal fieldLabel As String, ByVal cellValue As Variant)
     If IsBlankValue(cellValue) Then
         AddError errorList, sheetLabel, rowNumber, invoiceNumber, fieldLabel, "入っていません(必須です)。"
+    ElseIf IsError(cellValue) Then
+        AddError errorList, sheetLabel, rowNumber, invoiceNumber, fieldLabel, MSG_ERROR_VALUE
+    ElseIf IsNumberValue(cellValue) Then
+        ' 日付が数値(46326 など)で入っている:セルの表示形式が日付になっていない
+        AddError errorList, sheetLabel, rowNumber, invoiceNumber, fieldLabel, _
+            "日付として読めません(いまの値:" & CellText(cellValue) & ")。セルの表示形式を日付にして、日付を確かめてください。"
     ElseIf Not IsDateValue(cellValue) Then
         AddError errorList, sheetLabel, rowNumber, invoiceNumber, fieldLabel, _
             "日付として読めません(いまの値:" & CellText(cellValue) & ")。2026/10/31 のように入れてください。"
     End If
 End Sub
+
+' 数値でない値のメッセージ。エラー値・文字として入った数字は、それとわかるように書きます。
+Private Function NotNumberMessage(ByVal cellValue As Variant) As String
+    Dim shown As String
+
+    If IsError(cellValue) Then
+        NotNumberMessage = MSG_ERROR_VALUE
+        Exit Function
+    End If
+
+    shown = CellText(cellValue)
+    If VarType(cellValue) = vbString And IsNumeric(Replace(Replace(shown, "%", ""), ",", "")) Then
+        ' 「5」「10%」などが文字として入っている(表示形式が「文字列」のセル、ほかから貼り付けた値 など)
+        NotNumberMessage = "数字が文字として入っています(いまの値:" & shown & ")。" & _
+                           "セルの表示形式が「文字列」になっていないかを確かめて、数値として入れ直してください。"
+    Else
+        NotNumberMessage = "数値にしてください(いまの値:" & shown & ")。"
+    End If
+End Function
 
 Private Function IsBlankValue(ByVal cellValue As Variant) As Boolean
     IsBlankValue = (Trim$(CellText(cellValue)) = "")

@@ -5,6 +5,8 @@ Attribute VB_Name = "modData"
 ' ・1行目の見出しの文字で列を探します。列の順番を入れ替えても動きます。
 ' ・すべての列が空の行は飛ばします(途中に空の行があってもかまいません)。
 ' ・ここでは値をそのまま読むだけです。正しいかどうかは modValidate で調べます。
+'   (見出しがない・請求が1件もない、のような表そのものの誤りだけは、ここでエラーにします)
+' ・最後の行は LastValueRow で探します。フィルターや非表示で隠れた行も数えます。
 '==============================================================================
 Option Explicit
 
@@ -42,6 +44,11 @@ Public Function ReadInvoices(ByVal errorList As Collection) As Collection
             invoices.Add inv
         End If
     Next r
+
+    ' 1件もないまま進むと「0 件のPDFを作成しました」で終わってしまうので、ここで止める
+    If invoices.Count = 0 Then
+        AddError errorList, ws.Name, 0, "", "データ", "請求が1件もありません。2行目から請求を入れてください。"
+    End If
 End Function
 
 ' 「明細」を読み、clsDetail の集まりを返します。
@@ -85,7 +92,7 @@ Public Function HeaderColumn(ByVal ws As Worksheet, ByVal header As String) As L
     Dim lastCol As Long
     Dim c As Long
 
-    lastCol = ws.Cells(HEADER_ROW, ws.Columns.Count).End(xlToLeft).Column
+    lastCol = ws.UsedRange.Column + ws.UsedRange.Columns.Count - 1   ' 隠した列も含めて探す
     For c = 1 To lastCol
         If Trim$(CellText(ws.Cells(HEADER_ROW, c).Value)) = header Then
             HeaderColumn = c
@@ -94,10 +101,30 @@ Public Function HeaderColumn(ByVal ws As Worksheet, ByVal header As String) As L
     Next c
 End Function
 
-' セルの値を文字にします。空なら ""、#N/A などのエラー値なら "#エラー" を返します。
+' 指定した列で、値が入っているいちばん下の行の番号を返します(何もなければ 0)。
+' フィルターや非表示で隠れた行も数えます。End(xlUp) は、テーブルでない範囲のフィルターで
+' 隠れた行を飛ばし、Find も隠れた行を探さない(どちらも確かめ済み)ので、使っている範囲の
+' 値をまとめて読み、下から探します。
+Public Function LastValueRow(ByVal ws As Worksheet, ByVal col As Long) As Long
+    Dim lastUsed As Long
+    Dim columnValues As Variant
+    Dim r As Long
+
+    lastUsed = ws.UsedRange.Row + ws.UsedRange.Rows.Count - 1
+    If lastUsed < 2 Then lastUsed = 2   ' 2行以上で読むと、値がいつも2次元の配列になる
+    columnValues = ws.Range(ws.Cells(1, col), ws.Cells(lastUsed, col)).Value
+    For r = lastUsed To 1 Step -1
+        If Not IsEmpty(columnValues(r, 1)) Then
+            LastValueRow = r
+            Exit Function
+        End If
+    Next r
+End Function
+
+' セルの値を文字にします。空なら ""、#N/A などのエラー値なら CELL_ERROR_TEXT("#エラー")を返します。
 Public Function CellText(ByVal cellValue As Variant) As String
     If IsError(cellValue) Then
-        CellText = "#エラー"
+        CellText = CELL_ERROR_TEXT
     ElseIf IsEmpty(cellValue) Or IsNull(cellValue) Then
         CellText = ""
     Else
@@ -139,7 +166,7 @@ Private Function LastDataRow(ByVal ws As Worksheet, ByVal cols As Variant) As Lo
 
     LastDataRow = HEADER_ROW
     For Each c In cols
-        r = ws.Cells(ws.Rows.Count, CLng(c)).End(xlUp).Row
+        r = LastValueRow(ws, CLng(c))
         If r > LastDataRow Then LastDataRow = r
     Next c
 End Function

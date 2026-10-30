@@ -634,9 +634,10 @@ namespace BatchInvoicePdf.Build
                 XmlNode before = null;
                 if (prElementName == "workbookPr")
                 {
-                    // CT_Workbook order: fileVersion, fileSharing, workbookPr, ...
+                    // CT_Workbook order: fileVersion, fileSharing, workbookPr, ... (elements of other
+                    // namespaces, such as mc:AlternateContent, are skipped)
                     foreach (XmlNode n in root.ChildNodes)
-                        if (n is XmlElement && n.LocalName != "fileVersion" && n.LocalName != "fileSharing" && !(n.NamespaceURI != NsMain)) { before = n; break; }
+                        if (n is XmlElement && n.NamespaceURI == NsMain && n.LocalName != "fileVersion" && n.LocalName != "fileSharing") { before = n; break; }
                 }
                 else
                 {

@@ -46,7 +46,7 @@ Public Function SettingRow(ByVal itemLabel As String) As Long
     Dim lastRow As Long
     Dim r As Long
 
-    lastRow = shSettings.Cells(shSettings.Rows.Count, SETTINGS_LABEL_COLUMN).End(xlUp).Row
+    lastRow = LastValueRow(shSettings, SETTINGS_LABEL_COLUMN)
     For r = 1 To lastRow
         If Trim$(CellText(shSettings.Cells(r, SETTINGS_LABEL_COLUMN).Value)) = itemLabel Then
             SettingRow = r

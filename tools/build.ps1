@@ -70,7 +70,7 @@ $settingDefs = @(
     @{ Label = '電話番号'; Value = '00-0000-0000'; Note = '' },
     @{ Label = '登録番号'; Value = 'T0000000000000'
        Note = '適格請求書発行事業者の登録番号(T と数字13桁)。見本のため架空の番号です。' },
-    @{ Label = '振込先'; Value = 'みほん銀行 サンプル支店 普通 0000000 ミホンドウステーショナリー(カ'; Note = '' },
+    @{ Label = '振込先'; Value = '架空銀行 見本支店 普通 0000000 ミホンドウステーショナリー(カ'; Note = '' },
     @{ Group = '計算' },
     @{ Label = '消費税の端数処理'; Value = '切り捨て'; Choices = '切り捨て,四捨五入,切り上げ'
        Note = '税率ごとの合計に対して、1回だけ端数を処理します。' }
@@ -89,7 +89,7 @@ $usageLines = @(
     @(11, 'ボタン', 'head'),
     @(14, '見た目を確かめたいとき', 'head'),
     @(15, '[1件だけひな形に表示] で、指定した請求を「請求書ひな形」シートに表示します(PDFは作りません)。', ''),
-    @(16, '「請求一覧」の行を選んでから押すと、その請求番号が最初から入っています。', ''),
+    @(16, '請求番号を入れる欄には、最初は「請求一覧」の先頭の請求番号が入っています。', ''),
     @(18, '止まったとき', 'head'),
     @(19, '・入力の誤り … 「エラー一覧」シートに、シート・行・項目と直し方が出ます。', ''),
     @(20, '・それ以外 … 画面のメッセージと「実行履歴」シートに、止まった段階と請求番号が出ます。', ''),
@@ -117,6 +117,7 @@ $colorAccent = ConvertTo-ExcelColor 31 78 121
 $colorWhite = ConvertTo-ExcelColor 255 255 255
 
 # CSV の文字を、セルに入れる値にする(日付は日付の数値、% は小数、数字は数値。読めないものは文字のまま)
+# 文字の列(請求番号・顧客名 など)には使わない(「0012」が 12 になってしまうため)
 function ConvertTo-CellValue {
     param([string]$Text)
     if ([string]::IsNullOrEmpty($Text)) { return $null }
@@ -130,14 +131,20 @@ function ConvertTo-CellValue {
     return $Text
 }
 
+# TextHeaders の列は、CSV の文字をそのまま入れる
 function Read-Table {
-    param([string]$Path, [string[]]$Headers)
+    param([string]$Path, [string[]]$Headers, [string[]]$TextHeaders)
     $rows = @(Import-Csv -Path $Path -Encoding UTF8)
     $data = New-Object 'object[,]' ($rows.Count + 1), $Headers.Count
     for ($c = 0; $c -lt $Headers.Count; $c++) { $data[0, $c] = $Headers[$c] }
     for ($r = 0; $r -lt $rows.Count; $r++) {
         for ($c = 0; $c -lt $Headers.Count; $c++) {
-            $data[($r + 1), $c] = ConvertTo-CellValue $rows[$r].($Headers[$c])
+            $text = $rows[$r].($Headers[$c])
+            if ($TextHeaders -contains $Headers[$c]) {
+                $data[($r + 1), $c] = $(if ([string]::IsNullOrEmpty($text)) { $null } else { $text })
+            } else {
+                $data[($r + 1), $c] = ConvertTo-CellValue $text
+            }
         }
     }
     , $data
@@ -238,9 +245,12 @@ function Build-Settings {
     foreach ($row in $RowOf.Values) { $ws.Cells.Item($row, 2).Interior.Color = ConvertTo-ExcelColor 255 255 230 }   # 書き換える欄
 }
 
+# TextHeaders:CSV の文字をそのまま入れる列(請求番号・顧客名 など)
+# Choices:見出し → 選択肢(カンマ区切り)。その列にドロップダウンをつける(一覧にない値も入れられる)
 function Build-DataSheet {
-    param($ws, [string]$CsvPath, [string[]]$Headers, [string]$TableName, [hashtable]$Formats, [hashtable]$Widths)
-    $data = Read-Table -Path $CsvPath -Headers $Headers
+    param($ws, [string]$CsvPath, [string[]]$Headers, [string]$TableName, [hashtable]$Formats, [hashtable]$Widths,
+          [string[]]$TextHeaders, [hashtable]$Choices = @{})
+    $data = Read-Table -Path $CsvPath -Headers $Headers -TextHeaders $TextHeaders
     $rows = $data.GetLength(0)
     $cols = $data.GetLength(1)
     foreach ($col in $Formats.Keys) { $ws.Range("${col}:${col}").NumberFormat = $Formats[$col] }
@@ -250,6 +260,13 @@ function Build-DataSheet {
     $table = $ws.ListObjects.Add(1, $range, [Type]::Missing, 1)
     $table.Name = $TableName
     $table.TableStyle = 'TableStyleLight9'
+    foreach ($header in $Choices.Keys) {
+        $v = $table.ListColumns.Item($header).DataBodyRange.Validation
+        $v.Delete()
+        $v.Add(3, 3, 1, $Choices[$header])   # 3=リスト、3=情報
+        $v.ShowError = $false                 # 一覧にない値(殿 など)も、メッセージを出さずに入れられる
+        $v.InCellDropdown = $true
+    }
 }
 
 function Build-Template {
@@ -271,6 +288,7 @@ function Build-Template {
 
     # 宛名・請求番号・請求日
     $ws.Range('B4:C4').Merge()
+    $ws.Range('B4:C4').ShrinkToFit = $true   # 長い顧客名も切れずに1行に収める(結合1つだけなので安全)
     $ws.Range('B4:D4').Font.Size = 14
     $ws.Range('B4:D4').Borders.Item(9).LineStyle = 1
     $ws.Range('B4').NumberFormat = '@'
@@ -333,6 +351,7 @@ function Build-Template {
     $ws.Range('F13').Value2 = '金額'
     Set-HeaderStyle $ws.Range('B13:F13')
     $ws.Range('B14:B25').NumberFormat = '@'
+    $ws.Range('B14:B25').ShrinkToFit = $true   # 長い品名が隣の列で切れないように
     $ws.Range('D14:D25').NumberFormat = '#,##0'
     $ws.Range('E14:E25').NumberFormat = '[=0.08]"8%※";0%'
     $ws.Range('E14:E25').HorizontalAlignment = -4108
@@ -343,8 +362,9 @@ function Build-Template {
     $ws.Range('B14:F25').Borders.Item(12).Color = ConvertTo-ExcelColor 191 191 191   # 内側の横線は薄く
 
     # 税率ごとの小計・消費税・合計
+    # 設定の値の前後に空白があっても、マクロのチェック(前後の空白を取って比べる)と同じ結果になるよう TRIM する
     $round = { param($expr)
-        $r = & $setRef '消費税の端数処理'
+        $r = 'TRIM(' + (& $setRef '消費税の端数処理') + ')'
         "=IF($r=""切り上げ"",ROUNDUP($expr,0),IF($r=""四捨五入"",ROUND($expr,0),ROUNDDOWN($expr,0)))"
     }
     $ws.Range('B27').Value2 = '※は軽減税率(8%)の対象です。'
@@ -471,7 +491,13 @@ New-Item -ItemType Directory -Path $work | Out-Null
 $modules = New-Object 'System.Collections.Generic.List[BatchInvoicePdf.Build.VbaModule]'
 $modules.Add([BatchInvoicePdf.Build.VbaProjectWriter]::DocumentModule('ThisWorkbook', $true))
 foreach ($code in $sheetDefs.Values) { $modules.Add([BatchInvoicePdf.Build.VbaProjectWriter]::DocumentModule($code, $false)) }
+$documentNames = @('ThisWorkbook') + @($sheetDefs.Values)
 foreach ($file in Get-ChildItem -Path (Join-Path $root 'src') -File | Where-Object { $_.Extension -in '.bas', '.cls' } | Sort-Object Name) {
+    # シートと ThisWorkbook のモジュールは、上で空のものを作っている。src に置いても使われず、
+    # コードが黙って消えるので、ここで止める(コードは標準モジュールかクラスに置く)
+    if ($documentNames -contains $file.BaseName) {
+        throw "src\$($file.Name) は、シートか ThisWorkbook のモジュールです。この組み立てでは空のモジュールを作るので、コードは標準モジュール(.bas)かクラス(.cls)に置いてください。"
+    }
     $modules.Add([BatchInvoicePdf.Build.VbaProjectWriter]::LoadModule($file.FullName, 932))
 }
 $vbaProject = [BatchInvoicePdf.Build.VbaProjectWriter]::Build($modules, 932, $projectGuid)
@@ -502,10 +528,14 @@ try {
         Build-Usage $wb.Worksheets.Item('使い方')
         $settingRow = @{}
         Build-Settings $wb.Worksheets.Item('設定') $overrides $settingRow
+        # 「文字列」の表示形式は請求番号の列だけ(001 のような番号の 0 が消えないように)。
+        # 顧客名・品名などは、式(VLOOKUP など)を入れられるよう、標準のままにする。
         Build-DataSheet $wb.Worksheets.Item('請求一覧') (Join-Path $dataDir '請求一覧.csv') $invoiceHeaders 'T_請求一覧' `
-            @{ A = '@'; B = 'yyyy/mm/dd'; C = '@'; D = '@'; E = 'yyyy/mm/dd' } @{ A = 14; B = 12; C = 34; D = 8; E = 12 }
+            @{ A = '@'; B = 'yyyy/mm/dd'; E = 'yyyy/mm/dd' } @{ A = 14; B = 12; C = 34; D = 8; E = 12 } `
+            @('請求番号', '顧客名', '敬称') @{ '敬称' = '御中,様' }
         Build-DataSheet $wb.Worksheets.Item('明細') (Join-Path $dataDir '明細.csv') $detailHeaders 'T_明細' `
-            @{ A = '@'; B = '@'; D = '#,##0'; E = '0%' } @{ A = 14; B = 36; C = 8; D = 12; E = 8 }
+            @{ A = '@'; D = '#,##0'; E = '0%' } @{ A = 14; B = 36; C = 8; D = 12; E = 8 } `
+            @('請求番号', '品名')
         Build-Template $wb.Worksheets.Item('請求書ひな形') $settingRow
         Build-Errors $wb.Worksheets.Item('エラー一覧')
         Build-History $wb.Worksheets.Item('実行履歴')

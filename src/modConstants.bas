@@ -53,8 +53,12 @@ Public Const TAG_INVOICE_DATE As String = "{請求日}"
 Public Const FILE_DATE_FORMAT As String = "yyyymmdd"
 ' Windows のファイル名に使えない文字
 Public Const INVALID_FILE_CHARS As String = "\/:*?""<>|"
-' 保存先とファイル名を合わせた長さの上限(Windows の既定)
-Public Const MAX_PATH_LENGTH As Long = 259
+' 保存先とファイル名を合わせた長さの上限。Excel のPDF保存は 255 文字までで、256 文字以上は失敗する
+' (Microsoft 365 の Excel で確かめた。日本語も1文字として数える)
+Public Const MAX_PATH_LENGTH As Long = 255
+
+' セルの値がエラー値(#N/A など)のときに、文字として使う値
+Public Const CELL_ERROR_TEXT As String = "#エラー"
 
 '--- 明細の税率(この2つだけを受け付けます)
 Public Const TAX_RATE_STANDARD As Double = 0.1

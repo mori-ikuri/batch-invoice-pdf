@@ -29,11 +29,18 @@ Public Function TemplateRange(ByVal ws As Worksheet, ByVal rangeName As String) 
     Set TemplateRange = ws.Range(rangeName)
 End Function
 
-' ひな形に名前がそろっているかを調べ、明細欄に入る行数を返します(問題があれば 0)。
+' ひな形が表示されていて、名前がそろっているかを調べ、明細欄に入る行数を返します(問題があれば 0)。
 Public Function CheckTemplate(ByVal ws As Worksheet, ByVal errorList As Collection) As Long
     Dim nm As Variant
     Dim itemRows As Long
     Dim hasProblem As Boolean
+
+    ' 非表示のシートは Excel がPDFにできない(1件目で止まってしまう)ので、先に知らせる
+    If ws.Visible <> xlSheetVisible Then
+        AddError errorList, ws.Name, 0, "", "シートの表示", _
+            "ひな形シートが非表示になっています。非表示のシートはPDFにできないので、表示してください。"
+        hasProblem = True
+    End If
 
     For Each nm In TemplateNames()
         If TemplateRange(ws, CStr(nm)) Is Nothing Then
