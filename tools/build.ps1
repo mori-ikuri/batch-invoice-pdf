@@ -106,7 +106,7 @@ $buttonDefs = @(
 )
 
 $invoiceHeaders = @('請求番号', '請求日', '顧客名', '敬称', '支払期限')
-$detailHeaders = @('請求番号', '品名', '数量', '単価', '税率')
+$detailHeaders = @('請求番号', '日付', '品名', '数量', '単価', '税率')
 
 #-------------------------------------------------------------------------------
 # 小さな道具
@@ -275,31 +275,32 @@ function Build-Template {
     $sheetRef = "'" + $ws.Name + "'!"
     $setRef = { param($label) "'設定'!`$B`$" + $SettingRow[$label] }
 
-    foreach ($w in @(@('A', 2), @('B', 36), @('C', 9), @('D', 13), @('E', 15), @('F', 16), @('G', 2))) {
+    # B列は明細の日付。品名(C列)をその分だけ狭くして、全体の幅(A4縦1ページ)は日付を足す前と同じにしている
+    foreach ($w in @(@('A', 2), @('B', 7), @('C', 29), @('D', 9), @('E', 13), @('F', 15), @('G', 16), @('H', 2))) {
         $ws.Range("$($w[0]):$($w[0])").ColumnWidth = $w[1]
     }
 
     # 題
-    $ws.Range('B2:F2').Merge()
+    $ws.Range('B2:G2').Merge()
     $ws.Range('B2').Value2 = '請　求　書'
     Set-Title $ws.Range('B2') 20
     $ws.Range('B2').HorizontalAlignment = -4108
-    $ws.Range('B2:F2').Borders.Item(9).LineStyle = -4119   # 下:二重線
+    $ws.Range('B2:G2').Borders.Item(9).LineStyle = -4119   # 下:二重線
 
     # 宛名・請求番号・請求日
-    $ws.Range('B4:C4').Merge()
-    $ws.Range('B4:C4').ShrinkToFit = $true   # 長い顧客名も切れずに1行に収める(結合1つだけなので安全)
-    $ws.Range('B4:D4').Font.Size = 14
-    $ws.Range('B4:D4').Borders.Item(9).LineStyle = 1
+    $ws.Range('B4:D4').Merge()
+    $ws.Range('B4:D4').ShrinkToFit = $true   # 長い顧客名も切れずに1行に収める(結合1つだけなので安全)
+    $ws.Range('B4:E4').Font.Size = 14
+    $ws.Range('B4:E4').Borders.Item(9).LineStyle = 1
     $ws.Range('B4').NumberFormat = '@'
-    $ws.Range('E4').Value2 = '請求番号'
-    $ws.Range('E5').Value2 = '請求日'
-    $ws.Range('F4').NumberFormat = '@'
-    $ws.Range('F4:F5').HorizontalAlignment = -4152   # 右
-    $ws.Range('F5').NumberFormat = 'yyyy"年"m"月"d"日"'
+    $ws.Range('F4').Value2 = '請求番号'
+    $ws.Range('F5').Value2 = '請求日'
+    $ws.Range('G4').NumberFormat = '@'
+    $ws.Range('G4:G5').HorizontalAlignment = -4152   # 右
+    $ws.Range('G5').NumberFormat = 'yyyy"年"m"月"d"日"'
     $ws.Range('B6').Value2 = '下記のとおりご請求申し上げます。'
 
-    # 自社情報(設定シートを参照する式)。1行ずつ E:F を結合する。
+    # 自社情報(設定シートを参照する式)。1行ずつ F:G を結合する。
     # 「縮小して全体を表示」などの配置の設定を、結合した行をまたいでまとめて行うと、
     # Excel がまとめて1つに結合してしまうので、行ごとに設定する。
     $company = @(
@@ -310,56 +311,62 @@ function Build-Template {
         @(11, ('="登録番号 "&' + (& $setRef '登録番号')))
     )
     foreach ($line in $company) {
-        $area = $ws.Range("E$($line[0]):F$($line[0])")
+        $area = $ws.Range("F$($line[0]):G$($line[0])")
         $area.Merge()
         $area.ShrinkToFit = $true
-        $ws.Range("E$($line[0])").Formula = $line[1]
+        $ws.Range("F$($line[0])").Formula = $line[1]
     }
-    $ws.Range('E7').Font.Bold = $true
-    $ws.Range('E7').Font.Size = 12
+    $ws.Range('F7').Font.Bold = $true
+    $ws.Range('F7').Font.Size = 12
 
-    # ご請求金額・支払期限・振込先
+    # ご請求金額・支払期限・振込先(見出しは1行ずつ B:C を結合して、日付の列を足す前と同じ幅にする)
+    foreach ($row in 8, 9, 10) {
+        $ws.Range("B${row}:C${row}").Merge()
+        $ws.Range("B${row}").VerticalAlignment = -4108
+    }
     $ws.Range('B8').Value2 = 'ご請求金額(税込)'
     $ws.Range('B8').Font.Bold = $true
-    $ws.Range('B8').Interior.Color = $colorPale
-    $ws.Range('C8:D8').Merge()
-    $ws.Range('C8').Formula = '=F31'
-    $ws.Range('C8').NumberFormat = '"¥"#,##0'
-    $ws.Range('C8').Font.Size = 16
-    $ws.Range('C8').Font.Bold = $true
-    $ws.Range('C8').HorizontalAlignment = -4152
-    $ws.Range('C8').IndentLevel = 1   # 右の自社情報と離す
-    $ws.Range('B8:D8').Borders.Item(9).LineStyle = 1
-    $ws.Range('B8:D8').Borders.Item(9).Weight = -4138   # 中太
+    $ws.Range('B8:C8').Interior.Color = $colorPale
+    $ws.Range('D8:E8').Merge()
+    $ws.Range('D8').Formula = '=G31'
+    $ws.Range('D8').NumberFormat = '"¥"#,##0'
+    $ws.Range('D8').Font.Size = 16
+    $ws.Range('D8').Font.Bold = $true
+    $ws.Range('D8').HorizontalAlignment = -4152
+    $ws.Range('D8').IndentLevel = 1   # 右の自社情報と離す
+    $ws.Range('B8:E8').Borders.Item(9).LineStyle = 1
+    $ws.Range('B8:E8').Borders.Item(9).Weight = -4138   # 中太
     $ws.Range('B9').Value2 = 'お支払期限'
-    $ws.Range('C9:D9').Merge()
-    $ws.Range('C9').NumberFormat = 'yyyy"年"m"月"d"日"'
-    $ws.Range('C9').HorizontalAlignment = -4131   # 左
+    $ws.Range('D9:E9').Merge()
+    $ws.Range('D9').NumberFormat = 'yyyy"年"m"月"d"日"'
+    $ws.Range('D9').HorizontalAlignment = -4131   # 左
     $ws.Range('B10').Value2 = 'お振込先'
-    $ws.Range('C10:D12').Merge()
-    $ws.Range('C10').Formula = '=' + (& $setRef '振込先')
-    $ws.Range('C10').WrapText = $true
-    $ws.Range('C10').VerticalAlignment = -4160
-    $ws.Range('C10').Font.Size = 9
-    $ws.Range('B8:B10').VerticalAlignment = -4108
+    $ws.Range('D10:E12').Merge()
+    $ws.Range('D10').Formula = '=' + (& $setRef '振込先')
+    $ws.Range('D10').WrapText = $true
+    $ws.Range('D10').VerticalAlignment = -4160
+    $ws.Range('D10').Font.Size = 9
 
-    # 明細(14行目から25行目の12行)
-    $ws.Range('B13').Value2 = '品名'
-    $ws.Range('C13').Value2 = '数量'
-    $ws.Range('D13').Value2 = '単価'
-    $ws.Range('E13').Value2 = '税率'
-    $ws.Range('F13').Value2 = '金額'
-    Set-HeaderStyle $ws.Range('B13:F13')
-    $ws.Range('B14:B25').NumberFormat = '@'
-    $ws.Range('B14:B25').ShrinkToFit = $true   # 長い品名が隣の列で切れないように
-    $ws.Range('D14:D25').NumberFormat = '#,##0'
-    $ws.Range('E14:E25').NumberFormat = '[=0.08]"8%※";0%'
-    $ws.Range('E14:E25').HorizontalAlignment = -4108
-    $ws.Range('F14:F25').Formula = '=IF(B14="","",ROUNDDOWN(C14*D14,0))'
-    $ws.Range('F14:F25').NumberFormat = '#,##0'
+    # 明細(14行目から25行目の12行)。日付(取引年月日)は 10/5 の形(月/日)で出す
+    $ws.Range('B13').Value2 = '日付'
+    $ws.Range('C13').Value2 = '品名'
+    $ws.Range('D13').Value2 = '数量'
+    $ws.Range('E13').Value2 = '単価'
+    $ws.Range('F13').Value2 = '税率'
+    $ws.Range('G13').Value2 = '金額'
+    Set-HeaderStyle $ws.Range('B13:G13')
+    $ws.Range('B14:B25').NumberFormat = 'm/d'
+    $ws.Range('B14:B25').HorizontalAlignment = -4108
+    $ws.Range('C14:C25').NumberFormat = '@'
+    $ws.Range('C14:C25').ShrinkToFit = $true   # 長い品名が隣の列で切れないように
+    $ws.Range('E14:E25').NumberFormat = '#,##0'
+    $ws.Range('F14:F25').NumberFormat = '[=0.08]"8%※";0%'
+    $ws.Range('F14:F25').HorizontalAlignment = -4108
+    $ws.Range('G14:G25').Formula = '=IF(C14="","",ROUNDDOWN(D14*E14,0))'
+    $ws.Range('G14:G25').NumberFormat = '#,##0'
     $ws.Range('14:25').RowHeight = 20
-    $ws.Range('B13:F25').Borders.LineStyle = 1
-    $ws.Range('B14:F25').Borders.Item(12).Color = ConvertTo-ExcelColor 191 191 191   # 内側の横線は薄く
+    $ws.Range('B13:G25').Borders.LineStyle = 1
+    $ws.Range('B14:G25').Borders.Item(12).Color = ConvertTo-ExcelColor 191 191 191   # 内側の横線は薄く
 
     # 税率ごとの小計・消費税・合計
     # 設定の値の前後に空白があっても、マクロのチェック(前後の空白を取って比べる)と同じ結果になるよう TRIM する
@@ -369,34 +376,34 @@ function Build-Template {
     }
     $ws.Range('B27').Value2 = '※は軽減税率(8%)の対象です。'
     $ws.Range('B27').Font.Size = 9
-    $ws.Range('E27').Value2 = '10%対象 小計'
-    $ws.Range('F27').Formula = '=SUMIF($E$14:$E$25,0.1,$F$14:$F$25)'
-    $ws.Range('E28').Value2 = '消費税(10%)'
-    $ws.Range('F28').Formula = & $round 'F27*10/100'
-    $ws.Range('E29').Value2 = '8%対象 小計'
-    $ws.Range('F29').Formula = '=SUMIF($E$14:$E$25,0.08,$F$14:$F$25)'
-    $ws.Range('E30').Value2 = '消費税(8%)'
-    $ws.Range('F30').Formula = & $round 'F29*8/100'
-    $ws.Range('E31').Value2 = '合計(税込)'
-    $ws.Range('F31').Formula = '=F27+F28+F29+F30'
-    $ws.Range('F27:F31').NumberFormat = '#,##0'
-    $ws.Range('E27:F31').Borders.LineStyle = 1
-    $ws.Range('E27:E31').Interior.Color = $colorPale
-    $ws.Range('E31:F31').Font.Bold = $true
-    $ws.Range('E31:F31').Borders.Item(8).LineStyle = -4119   # 上:二重線
+    $ws.Range('F27').Value2 = '10%対象 小計'
+    $ws.Range('G27').Formula = '=SUMIF($F$14:$F$25,0.1,$G$14:$G$25)'
+    $ws.Range('F28').Value2 = '消費税(10%)'
+    $ws.Range('G28').Formula = & $round 'G27*10/100'
+    $ws.Range('F29').Value2 = '8%対象 小計'
+    $ws.Range('G29').Formula = '=SUMIF($F$14:$F$25,0.08,$G$14:$G$25)'
+    $ws.Range('F30').Value2 = '消費税(8%)'
+    $ws.Range('G30').Formula = & $round 'G29*8/100'
+    $ws.Range('F31').Value2 = '合計(税込)'
+    $ws.Range('G31').Formula = '=G27+G28+G29+G30'
+    $ws.Range('G27:G31').NumberFormat = '#,##0'
+    $ws.Range('F27:G31').Borders.LineStyle = 1
+    $ws.Range('F27:F31').Interior.Color = $colorPale
+    $ws.Range('F31:G31').Font.Bold = $true
+    $ws.Range('F31:G31').Borders.Item(8).LineStyle = -4119   # 上:二重線
 
     # 差し込み先の名前(このシートだけの名前)
     $names = [ordered]@{
-        '差込_請求番号' = '$F$4';  '差込_請求日' = '$F$5'; '差込_顧客名' = '$B$4'; '差込_敬称' = '$D$4'
-        '差込_支払期限' = '$C$9';  '差込_品名' = '$B$14:$B$25'; '差込_数量' = '$C$14:$C$25'
-        '差込_単価' = '$D$14:$D$25'; '差込_税率' = '$E$14:$E$25'
+        '差込_請求番号' = '$G$4';  '差込_請求日' = '$G$5'; '差込_顧客名' = '$B$4'; '差込_敬称' = '$E$4'
+        '差込_支払期限' = '$D$9';  '差込_日付' = '$B$14:$B$25'; '差込_品名' = '$C$14:$C$25'
+        '差込_数量' = '$D$14:$D$25'; '差込_単価' = '$E$14:$E$25'; '差込_税率' = '$F$14:$F$25'
     }
     foreach ($n in $names.Keys) { [void]$ws.Names.Add($n, '=' + $sheetRef + $names[$n]) }
 
     # 印刷(A4縦・1ページ)
     $app.PrintCommunication = $false
     $ps = $ws.PageSetup
-    $ps.PrintArea = '$A$1:$G$32'
+    $ps.PrintArea = '$A$1:$H$32'
     $ps.PaperSize = 9            # A4
     $ps.Orientation = 1          # 縦
     $ps.Zoom = $false
@@ -534,7 +541,7 @@ try {
             @{ A = '@'; B = 'yyyy/mm/dd'; E = 'yyyy/mm/dd' } @{ A = 14; B = 12; C = 34; D = 8; E = 12 } `
             @('請求番号', '顧客名', '敬称') @{ '敬称' = '御中,様' }
         Build-DataSheet $wb.Worksheets.Item('明細') (Join-Path $dataDir '明細.csv') $detailHeaders 'T_明細' `
-            @{ A = '@'; D = '#,##0'; E = '0%' } @{ A = 14; B = 36; C = 8; D = 12; E = 8 } `
+            @{ A = '@'; B = 'yyyy/mm/dd'; E = '#,##0'; F = '0%' } @{ A = 14; B = 12; C = 36; D = 8; E = 12; F = 8 } `
             @('請求番号', '品名')
         Build-Template $wb.Worksheets.Item('請求書ひな形') $settingRow
         Build-Errors $wb.Worksheets.Item('エラー一覧')

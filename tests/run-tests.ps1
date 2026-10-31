@@ -11,6 +11,7 @@
       ・エラー確認用のデータで、決めたとおりのエラーが「エラー一覧」に出る(tests\expected-errors.csv)
       ・正常なデータで、エラーがない/20件のPDFができる/ファイル名が決まりどおり/1ページずつ
       ・ひな形の小計・消費税・合計が、CSV から計算した値と合う(端数処理の3つの設定すべて)
+      ・明細の日付が、ひな形に 月/日(10/5 の形)で、「明細」に入れた順のまま出る。日付の空欄・日付でない値は止める
       ・エラーが1件でもあれば、1件も作らない
       ・同名ファイル:「止める」で止まり、「上書き」で置き換わる
       ・想定外のエラー(PDFを開いたまま上書き)で、止まった請求番号が画面の文と実行履歴に出る
@@ -165,7 +166,7 @@ try {
     #---------------------------------------------------------------------------
     $wb = $app.Workbooks.Open($normalBook, 0, $true)   # 読み取り専用で開く
     $tpl = $wb.Worksheets.Item('請求書ひな形')
-    Test-That '配る状態:ひな形の差し込み先が空' ($tpl.Range('F4').Text -eq '' -and $tpl.Range('B14').Text -eq '' -and $tpl.Range('B4').Text -eq '')
+    Test-That '配る状態:ひな形の差し込み先が空' ($tpl.Range('G4').Text -eq '' -and $tpl.Range('B14').Text -eq '' -and $tpl.Range('C14').Text -eq '' -and $tpl.Range('B4').Text -eq '')
     Test-That '配る状態:エラー一覧が未チェック' ($wb.Worksheets.Item('エラー一覧').Range('A2').Text -eq 'まだチェックしていません。')
     Test-That '配る状態:実行履歴が空' ((Get-History $wb).Count -eq 0)
     $actions = @($wb.Worksheets.Item('使い方').Shapes | ForEach-Object { $_.OnAction })
@@ -173,7 +174,7 @@ try {
         Test-That "ボタン:$m がついている" (@($actions | Where-Object { $_ -like "*$m" }).Count -eq 1) ($actions -join ' / ')
     }
     Test-That '配る状態:最初に「使い方」シートが開く' ($wb.ActiveSheet.Name -eq '使い方') $wb.ActiveSheet.Name
-    Test-That 'ひな形:長い顧客名・品名は縮小して収める' ($tpl.Range('B4').ShrinkToFit -and $tpl.Range('B14').ShrinkToFit -and $tpl.Range('B25').ShrinkToFit)
+    Test-That 'ひな形:長い顧客名・品名は縮小して収める' ($tpl.Range('B4').ShrinkToFit -and $tpl.Range('C14').ShrinkToFit -and $tpl.Range('C25').ShrinkToFit)
     $honorific = ''
     try { $honorific = $wb.Worksheets.Item('請求一覧').Range('D2').Validation.Formula1 } catch { }
     Test-That '請求一覧:敬称をドロップダウンで選べる(御中・様)' ($honorific -eq '御中,様') $honorific
@@ -190,6 +191,11 @@ try {
     Test-That "エラー確認用:エラーが $($expected.Count) 件と出る" ($message -like "*エラーが $($expected.Count) 件*") $message
     Test-That 'エラー確認用:エラー一覧が期待どおり(シート・行・請求番号・項目、並び順も)' `
         (($actual -join "`n") -eq ($expected -join "`n")) ("実際:" + ($actual -join ' / '))
+    $dateErrs = @((Get-ErrorRows $wb) | Where-Object { $_.Key -like '明細,*,日付' })
+    Test-That 'エラー確認用:明細の日付の空欄・日付でない値に、直し方を出す' `
+        ($dateErrs.Count -eq 2 -and $dateErrs[0].Message -eq '入っていません(必須です)。' -and
+         $dateErrs[1].Message -eq '日付として読めません(いまの値:未定)。2026/10/31 のように入れてください。') `
+        (@($dateErrs | ForEach-Object { "$($_.Key) $($_.Message)" }) -join ' / ')
     $errorSample = Join-Path $work 'error-list-sample.pdf'
     $wb.Worksheets.Item('エラー一覧').ExportAsFixedFormat(0, $errorSample)   # 見本(docs\見本 に置く用)
     $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($true)
@@ -227,19 +233,36 @@ try {
             $no = $inv.'請求番号'
             $msg = Invoke-Macro $wb 'modMain.ExecutePreview' @($no)
             $e = $expectedTotals[$no]
-            $got = @([decimal]$tpl.Range('F27').Value2, [decimal]$tpl.Range('F28').Value2, [decimal]$tpl.Range('F29').Value2,
-                     [decimal]$tpl.Range('F30').Value2, [decimal]$tpl.Range('F31').Value2, [decimal]$tpl.Range('C8').Value2)
+            $got = @([decimal]$tpl.Range('G27').Value2, [decimal]$tpl.Range('G28').Value2, [decimal]$tpl.Range('G29').Value2,
+                     [decimal]$tpl.Range('G30').Value2, [decimal]$tpl.Range('G31').Value2, [decimal]$tpl.Range('D8').Value2)
             $want = @($e.S10, $e.T10, $e.S8, $e.T8, $e.Total, $e.Total)
-            if (($got -join ',') -ne ($want -join ',') -or $tpl.Range('F4').Text -ne $no -or $tpl.Range('B4').Text -ne $inv.'顧客名') {
+            if (($got -join ',') -ne ($want -join ',') -or $tpl.Range('G4').Text -ne $no -or $tpl.Range('B4').Text -ne $inv.'顧客名') {
                 $bad += "$no 実際[$($got -join ',')] 期待[$($want -join ',')] $msg"
             }
         }
         Test-That "ひな形:小計・消費税・合計が合う(端数処理=$mode、$($invoices.Count) 件)" ($bad.Count -eq 0) ($bad -join ' / ')
     }
     Set-Setting $wb '消費税の端数処理' '切り捨て'
-    $company = @(7..11 | ForEach-Object { $tpl.Cells.Item($_, 5).Text })
+    $company = @(7..11 | ForEach-Object { $tpl.Cells.Item($_, 6).Text })
     $wantCompany = @('みほん堂ステーショナリー株式会社', '〒000-0000', '東京都架空区見本町1-2-3 サンプルビル4階', 'TEL 00-0000-0000', '登録番号 T0000000000000')
     Test-That 'ひな形:自社情報(自社名・郵便番号・住所・電話・登録番号)が1行ずつ出る' (($company -join '|') -eq ($wantCompany -join '|')) ($company -join ' / ')
+
+    # 明細の日付(取引年月日):月/日(10/5 の形)で、「明細」に入れた順のまま出る。明細のない行は空
+    $detailRows = @(Import-Csv -Path (Join-Path $root 'testdata\正常\明細.csv') -Encoding UTF8)
+    $bad = @()
+    foreach ($inv in $invoices) {
+        $no = $inv.'請求番号'
+        $msg = Invoke-Macro $wb 'modMain.ExecutePreview' @($no)
+        $want = @($detailRows | Where-Object { $_.'請求番号' -eq $no } | ForEach-Object {
+            $d = [datetime]::ParseExact($_.'日付', 'yyyy/MM/dd', [Globalization.CultureInfo]::InvariantCulture)
+            "$($d.Month)/$($d.Day)"
+        })
+        $got = @(1..$want.Count | ForEach-Object { $tpl.Cells.Item(13 + $_, 2).Text })
+        if (($got -join ',') -ne ($want -join ',') -or $tpl.Cells.Item(14 + $want.Count, 2).Text -ne '') {
+            $bad += "$no 実際[$($got -join ',')] 期待[$($want -join ',')] $msg"
+        }
+    }
+    Test-That "ひな形:明細の日付が 月/日 で、入れた順に出る($($invoices.Count) 件)" ($bad.Count -eq 0) ($bad -join ' / ')
     $msg = Invoke-Macro $wb 'modMain.ExecutePreview' @('INV-9999')
     Test-That 'ひな形:一覧にない請求番号は表示しない' ($msg -like '*表示できません*') $msg
 
@@ -253,7 +276,7 @@ try {
     $infos = @($pdfs | ForEach-Object { Get-PdfInfo $_.FullName })
     Test-That 'PDF作成:どれもPDFで1ページ' (@($infos | Where-Object { -not $_.IsPdf -or $_.Pages -ne 1 }).Count -eq 0) (($infos | ForEach-Object { $_.Pages }) -join ',')
     Test-That 'PDF作成:PDFに作成者(Author)を入れていない' (@($infos | Where-Object { $_.Author }).Count -eq 0)
-    Test-That 'PDF作成:終わったあと、ひな形を空に戻す' ($tpl.Range('F4').Text -eq '' -and $tpl.Range('B14').Text -eq '')
+    Test-That 'PDF作成:終わったあと、ひな形を空に戻す' ($tpl.Range('G4').Text -eq '' -and $tpl.Range('B14').Text -eq '' -and $tpl.Range('C14').Text -eq '')
     $history = Get-History $wb
     Test-That 'PDF作成:実行履歴に日時・件数・保存先' ($history[-1].Operation -eq 'PDF作成' -and $history[-1].Result -eq '完了' -and $history[-1].Count -eq "$($invoices.Count)" -and $history[-1].Folder -eq $out) ($history[-1] | Out-String)
     # 見本(値引きの行と 8% の品目がある INV-1009)。-SampleDir のときに docs\見本 などへ置く
@@ -275,11 +298,11 @@ try {
     New-Item -ItemType Directory -Path $out2 | Out-Null
     Set-Setting $wb '保存先フォルダ' $out2
     $details = $wb.Worksheets.Item('明細')
-    [BatchInvoicePdf.Build.Com]::SetValue2($details.Range('E2'), 0.05)
+    [BatchInvoicePdf.Build.Com]::SetValue2($details.Range('F2'), 0.05)
     $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($true)
     $errs = Get-ErrorRows $wb
     Test-That 'エラー1件:1件も作らずに止まる' ($errs.Count -eq 1 -and $errs[0].Key -eq '明細,2,INV-1001,税率' -and @(Get-ChildItem $out2).Count -eq 0) ("$message / " + (($errs | ForEach-Object { $_.Key }) -join ' / '))
-    [BatchInvoicePdf.Build.Com]::SetValue2($details.Range('E2'), 0.1)
+    [BatchInvoicePdf.Build.Com]::SetValue2($details.Range('F2'), 0.1)
     Set-Setting $wb '保存先フォルダ' $out
 
     # 想定外のエラー:5件目のPDFを開いたまま(書き込めない)で上書き
@@ -383,22 +406,24 @@ try {
     $copied = $wb.Worksheets.Item($tpl.Index + 1)
     Set-Setting $wb 'ひな形シート名' $copied.Name
     $msg = Invoke-Macro $wb 'modMain.ExecutePreview' @('INV-1001')
-    Test-That "ひな形:コピーしたシート($($copied.Name))を設定で選べる" ($msg -like "*「$($copied.Name)」シートに表示しました*" -and $copied.Range('F4').Text -eq 'INV-1001') $msg
+    Test-That "ひな形:コピーしたシート($($copied.Name))を設定で選べる" ($msg -like "*「$($copied.Name)」シートに表示しました*" -and $copied.Range('G4').Text -eq 'INV-1001') $msg
     Set-Setting $wb 'ひな形シート名' '請求書ひな形'
 
     # 明細欄を広げる:13行目の明細を足すと止まり、ひな形の途中に1行挿入すると通る
     $details = $wb.Worksheets.Item('明細')
     $next = $details.Cells.Item($details.Rows.Count, 1).End(-4162).Row + 1   # -4162 = 上へ
-    $values = @('INV-1016', '追加の品', 1, 100, 0.1)
+    $values = @('INV-1016', ([datetime]'2026-10-31').ToOADate(), '追加の品', 1, 100, 0.1)
     for ($c = 0; $c -lt $values.Count; $c++) { [BatchInvoicePdf.Build.Com]::SetValue2($details.Cells.Item($next, $c + 1), $values[$c]) }
     $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($false)
     $errs = Get-ErrorRows $wb
     Test-That '明細欄:13行の請求はひな形(12行)に入らず止まる' ($errs.Count -eq 1 -and $errs[0].Message -like '*明細が 13 行あり*') $message
     [void]$tpl.Rows.Item(20).Insert()
-    $tpl.Range('F20').Formula = '=IF(B20="","",ROUNDDOWN(C20*D20,0))'
+    $tpl.Range('G20').Formula = '=IF(C20="","",ROUNDDOWN(D20*E20,0))'
     $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($false)
     $msg = Invoke-Macro $wb 'modMain.ExecutePreview' @('INV-1016')
-    Test-That '明細欄:ひな形の途中に1行挿入すると、名前と式が広がって通る' ($message -like 'エラーはありません*' -and $tpl.Range('B26').Text -eq '追加の品' -and $tpl.Range('F32').Text -ne '') "$message / $msg / B26=$($tpl.Range('B26').Text)"
+    Test-That '明細欄:ひな形の途中に1行挿入すると、名前と式が広がって通る' `
+        ($message -like 'エラーはありません*' -and $tpl.Range('B26').Text -eq '10/31' -and $tpl.Range('C26').Text -eq '追加の品' -and $tpl.Range('G32').Text -ne '') `
+        "$message / $msg / B26=$($tpl.Range('B26').Text) C26=$($tpl.Range('C26').Text)"
 
     # 実行後の保存:閉じて開き直しても履歴が残る
     $history = Get-History $wb
@@ -418,8 +443,8 @@ try {
     $invoiceSheet = $wb.Worksheets.Item('請求一覧')
     $details = $wb.Worksheets.Item('明細')
     $invoiceSheet.Range('C2').Formula = '=NA()'                          # 顧客名がエラー値(VLOOKUP の失敗など)
-    $details.Range('C2').NumberFormat = '@'
-    [BatchInvoicePdf.Build.Com]::SetValue2($details.Range('C2'), '5')    # 数量が文字の「5」
+    $details.Range('D2').NumberFormat = '@'
+    [BatchInvoicePdf.Build.Com]::SetValue2($details.Range('D2'), '5')    # 数量が文字の「5」
     $wb.Worksheets.Item('請求書ひな形').Visible = 0                        # ひな形を非表示
     $message = Invoke-Macro $wb 'modMain.ExecuteBatch' @($true)
     $errs = Get-ErrorRows $wb
@@ -429,8 +454,8 @@ try {
     Test-That '非表示のひな形:PDFにできないと、作る前に知らせる' ((& $pick '請求書ひな形,,,シートの表示' '*非表示*') -eq 1)
     Test-That '上の3つ:1件も作らずに止まる' ($message -like '*PDFは1件も作成していません*' -and @(Get-ChildItem $outEdge).Count -eq 0) $message
     [BatchInvoicePdf.Build.Com]::SetValue2($invoiceSheet.Range('C2'), '株式会社ひな形システムズ')
-    [void]$details.Range('C2').ClearFormats()
-    [BatchInvoicePdf.Build.Com]::SetValue2($details.Range('C2'), 5.0)
+    [void]$details.Range('D2').ClearFormats()
+    [BatchInvoicePdf.Build.Com]::SetValue2($details.Range('D2'), 5.0)
     $wb.Worksheets.Item('請求書ひな形').Visible = -1
 
     # 顧客名は式で出してもよい(手順書に書いたこと):式の結果が請求書に出る
@@ -438,6 +463,18 @@ try {
     $msg = Invoke-Macro $wb 'modMain.ExecutePreview' @('INV-1002')
     Test-That '式:顧客名を式で出しても、その結果が請求書に出る' ($wb.Worksheets.Item('請求書ひな形').Range('B4').Text -eq '例題建設株式会社') "$msg / B4=$($wb.Worksheets.Item('請求書ひな形').Range('B4').Text)"
     [BatchInvoicePdf.Build.Com]::SetValue2($invoiceSheet.Range('C3'), '例題建設株式会社')
+
+    # 明細は入れた順のまま出す(日付で並べ替えない):INV-1009 の1行目だけを、あとの行より遅い日付にする
+    $firstRow = @(2..200 | Where-Object { $details.Cells.Item($_, 1).Text -eq 'INV-1009' })[0]
+    $oldDate = $details.Cells.Item($firstRow, 2).Value2
+    [BatchInvoicePdf.Build.Com]::SetValue2($details.Cells.Item($firstRow, 2), ([datetime]'2026-10-30').ToOADate())
+    $secondDate = [datetime]::FromOADate($details.Cells.Item($firstRow + 1, 2).Value2)
+    $msg = Invoke-Macro $wb 'modMain.ExecutePreview' @('INV-1009')
+    $tplEdge = $wb.Worksheets.Item('請求書ひな形')
+    Test-That '明細の順:日付で並べ替えず、「明細」に入れた順に出す' `
+        ($tplEdge.Range('B14').Text -eq '10/30' -and $tplEdge.Range('B15').Text -eq "$($secondDate.Month)/$($secondDate.Day)") `
+        "$msg / B14=$($tplEdge.Range('B14').Text) B15=$($tplEdge.Range('B15').Text)"
+    [BatchInvoicePdf.Build.Com]::SetValue2($details.Cells.Item($firstRow, 2), $oldDate)
 
     # 保存先とファイル名を合わせて 255 文字を超えるものだけを止める(Excel のPDF保存の上限)
     $long = $work
@@ -457,7 +494,7 @@ try {
     New-Item -ItemType Directory -Path $outProtect | Out-Null
     Set-Setting $wb '保存先フォルダ' $outProtect
     $protectedTemplate = $wb.Worksheets.Item('請求書ひな形')
-    foreach ($n in '差込_請求番号', '差込_請求日', '差込_顧客名', '差込_敬称', '差込_支払期限', '差込_品名', '差込_数量', '差込_単価', '差込_税率') {
+    foreach ($n in '差込_請求番号', '差込_請求日', '差込_顧客名', '差込_敬称', '差込_支払期限', '差込_日付', '差込_品名', '差込_数量', '差込_単価', '差込_税率') {
         foreach ($cell in $protectedTemplate.Range($n).Cells) { $cell.MergeArea.Locked = $false }
     }
     $protectedTemplate.Protect()

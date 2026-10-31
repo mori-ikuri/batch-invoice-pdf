@@ -5,8 +5,9 @@ Attribute VB_Name = "modFill"
 ' ・どのセルに何を入れるかは、ひな形シートの「名前の定義」で決めています
 '   (数式タブ → 名前の管理。「差込_請求番号」などの名前で、範囲はひな形シート)。
 '   セルを動かしても名前がついてくるので、レイアウトを変えてもコードは直さなくてよいです。
-' ・明細欄の行数は「差込_品名」の行数で決まります。行を増やすときは、明細の4つの名前
-'   (差込_品名・差込_数量・差込_単価・差込_税率)を同じ行数に広げてください。
+' ・明細欄の行数は「差込_品名」の行数で決まります。行を増やすときは、明細の5つの名前
+'   (差込_日付・差込_品名・差込_数量・差込_単価・差込_税率)を同じ行数に広げてください。
+' ・明細は「明細」シートに入れた順のまま流し込みます(日付で並べ替えません)。
 ' ・金額・小計・消費税・合計は、ひな形の式で計算します。マクロは値を入れるだけです。
 '==============================================================================
 Option Explicit
@@ -52,7 +53,7 @@ Public Function CheckTemplate(ByVal ws As Worksheet, ByVal errorList As Collecti
     If hasProblem Then Exit Function
 
     itemRows = TemplateRange(ws, NAME_ITEM).Rows.Count
-    For Each nm In Array(NAME_QUANTITY, NAME_UNIT_PRICE, NAME_TAX_RATE)
+    For Each nm In Array(NAME_TRADE_DATE, NAME_QUANTITY, NAME_UNIT_PRICE, NAME_TAX_RATE)
         If TemplateRange(ws, CStr(nm)).Rows.Count <> itemRows Then
             AddError errorList, ws.Name, 0, "", CStr(nm), _
                 "明細の名前の行数がそろっていません(「" & NAME_ITEM & "」は " & itemRows & " 行、「" & nm & "」は " & _
@@ -78,6 +79,7 @@ Public Sub FillInvoice(ByVal ws As Worksheet, ByVal inv As clsInvoice)
 
     For Each d In inv.Details
         i = i + 1
+        TemplateRange(ws, NAME_TRADE_DATE).Cells(i, 1).Value = CDate(d.TradeDate)
         TemplateRange(ws, NAME_ITEM).Cells(i, 1).Value = d.ItemName
         TemplateRange(ws, NAME_QUANTITY).Cells(i, 1).Value = d.Quantity
         TemplateRange(ws, NAME_UNIT_PRICE).Cells(i, 1).Value = d.UnitPrice
@@ -108,5 +110,5 @@ End Sub
 ' ひな形にそろっているべき名前の一覧
 Private Function TemplateNames() As Variant
     TemplateNames = Array(NAME_INVOICE_NO, NAME_INVOICE_DATE, NAME_CUSTOMER, NAME_HONORIFIC, NAME_DUE_DATE, _
-                          NAME_ITEM, NAME_QUANTITY, NAME_UNIT_PRICE, NAME_TAX_RATE)
+                          NAME_TRADE_DATE, NAME_ITEM, NAME_QUANTITY, NAME_UNIT_PRICE, NAME_TAX_RATE)
 End Function

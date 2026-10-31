@@ -65,6 +65,7 @@ Public Sub CheckDetail(ByVal d As clsDetail, ByVal errorList As Collection)
 
     sheetLabel = shDetails.Name
     RequireText errorList, sheetLabel, d.RowNo, d.InvoiceNo, COL_INVOICE_NO, d.InvoiceNo
+    CheckDate errorList, sheetLabel, d.RowNo, d.InvoiceNo, COL_TRADE_DATE, d.TradeDate
     RequireText errorList, sheetLabel, d.RowNo, d.InvoiceNo, COL_ITEM, d.ItemName
 
     If IsBlankValue(d.Quantity) Then

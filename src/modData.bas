@@ -57,7 +57,7 @@ Public Function ReadDetails(ByVal errorList As Collection) As Collection
     Dim ws As Worksheet
     Dim allDetails As Collection
     Dim d As clsDetail
-    Dim cNo As Long, cItem As Long, cQuantity As Long, cPrice As Long, cRate As Long
+    Dim cNo As Long, cTradeDate As Long, cItem As Long, cQuantity As Long, cPrice As Long, cRate As Long
     Dim lastRow As Long
     Dim r As Long
 
@@ -66,18 +66,20 @@ Public Function ReadDetails(ByVal errorList As Collection) As Collection
     Set ReadDetails = allDetails
 
     cNo = FindColumn(ws, COL_INVOICE_NO, errorList)
+    cTradeDate = FindColumn(ws, COL_TRADE_DATE, errorList)
     cItem = FindColumn(ws, COL_ITEM, errorList)
     cQuantity = FindColumn(ws, COL_QUANTITY, errorList)
     cPrice = FindColumn(ws, COL_UNIT_PRICE, errorList)
     cRate = FindColumn(ws, COL_TAX_RATE, errorList)
-    If cNo = 0 Or cItem = 0 Or cQuantity = 0 Or cPrice = 0 Or cRate = 0 Then Exit Function
+    If cNo = 0 Or cTradeDate = 0 Or cItem = 0 Or cQuantity = 0 Or cPrice = 0 Or cRate = 0 Then Exit Function
 
-    lastRow = LastDataRow(ws, Array(cNo, cItem, cQuantity, cPrice, cRate))
+    lastRow = LastDataRow(ws, Array(cNo, cTradeDate, cItem, cQuantity, cPrice, cRate))
     For r = HEADER_ROW + 1 To lastRow
-        If Not IsBlankRow(ws, r, Array(cNo, cItem, cQuantity, cPrice, cRate)) Then
+        If Not IsBlankRow(ws, r, Array(cNo, cTradeDate, cItem, cQuantity, cPrice, cRate)) Then
             Set d = New clsDetail
             d.RowNo = r
             d.InvoiceNo = Trim$(CellText(ws.Cells(r, cNo).Value))
+            d.TradeDate = ws.Cells(r, cTradeDate).Value
             d.ItemName = Trim$(CellText(ws.Cells(r, cItem).Value))
             d.Quantity = ws.Cells(r, cQuantity).Value
             d.UnitPrice = ws.Cells(r, cPrice).Value
